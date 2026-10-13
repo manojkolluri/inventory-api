@@ -30,7 +30,7 @@ INVENTORY = {
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "auth": "v3"}
 
 
 @app.get("/items/{item_id}")
