@@ -12,6 +12,10 @@ from google.oauth2 import id_token
 
 _bearer = HTTPBearer(auto_error=False)
 
+# Audience used by `gcloud auth print-identity-token` for user (human) accounts.
+# `--audiences=<Cloud Run URL>` only works for service accounts.
+_GCLOUD_SDK_AUDIENCE = "32555940559.apps.googleusercontent.com"
+
 
 @dataclass(frozen=True)
 class AuthenticatedUser:
@@ -22,28 +26,30 @@ def _auth_disabled() -> bool:
     return os.getenv("AUTH_DISABLED", "false").lower() in {"1", "true", "yes"}
 
 
-def _token_audience() -> str:
-    # Must match the Cloud Run service URL used with --audiences=...
-    return os.getenv("TOKEN_AUDIENCE", "").rstrip("/")
+def _token_audiences() -> list[str]:
+    audiences: list[str] = []
+    configured = os.getenv("TOKEN_AUDIENCE", "").rstrip("/")
+    if configured:
+        audiences.append(configured)
+    audiences.append(_GCLOUD_SDK_AUDIENCE)
+    return audiences
 
 
-def verify_google_identity_token(token: str, audience: str) -> AuthenticatedUser:
-    if not audience:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="TOKEN_AUDIENCE is not set on the server",
-        )
-    try:
-        claims = id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            audience=audience,
-        )
-    except ValueError as exc:
+def verify_google_identity_token(token: str) -> AuthenticatedUser:
+    request = google_requests.Request()
+    last_error: Exception | None = None
+
+    for audience in _token_audiences():
+        try:
+            claims = id_token.verify_oauth2_token(token, request, audience=audience)
+            break
+        except ValueError as exc:
+            last_error = exc
+    else:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid identity token: {exc}",
-        ) from exc
+            detail=f"Invalid identity token: {last_error}",
+        )
 
     email = claims.get("email")
     if not email:
@@ -67,4 +73,4 @@ async def require_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return verify_google_identity_token(credentials.credentials, _token_audience())
+    return verify_google_identity_token(credentials.credentials)
