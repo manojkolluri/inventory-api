@@ -1,3 +1,4 @@
 fastapi[standard]==0.143.0
 google-auth==2.37.0
+google-cloud-bigquery==3.27.0
 requests==2.32.3
